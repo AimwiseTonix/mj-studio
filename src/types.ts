@@ -9,6 +9,8 @@ export interface MJTask {
   startTime?: number
   finishTime?: number
   imageUrl?: string
+  videoUrl?: string
+  gifUrl?: string
   status: 'NOT_START' | 'SUBMITTED' | 'IN_PROGRESS' | 'FAILURE' | 'SUCCESS' | 'CANCEL'
   progress?: string
   failReason?: string
