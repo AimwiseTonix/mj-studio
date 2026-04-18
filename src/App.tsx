@@ -272,11 +272,47 @@ function MJImageSection({ initialPrompt, initialImageUrl, initialTaskId, mode, c
 
   const currentItem = history[history.length - 1]
 
+  // 检查是否有upscale的结果，用于显示视频按钮
+  const hasUpscale = history.some(item => item.type === 'upscale')
+
   function stop() {
     if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
   }
 
   function clearError() { setErrorMsg(null) }
+
+  // 视频生成
+  const [videoLoading, setVideoLoading] = useState(false)
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+
+  async function handleVideo(imageUrl: string) {
+    setVideoLoading(true)
+    setErrorMsg(null)
+    try {
+      const res = await submitVideo(imageUrl)
+      const videoId = res.result ?? res.taskId
+      if (!videoId) { setVideoLoading(false); return }
+      // 轮询视频任务状态
+      pollingRef.current = setInterval(async () => {
+        try {
+          const task = await getTask(videoId, mode)
+          if (task.status === 'SUCCESS' && (task.videoUrl || task.gifUrl)) {
+            stop()
+            setVideoLoading(false)
+            setVideoUrl(task.videoUrl || task.gifUrl)
+          } else if (task.status === 'FAILURE') {
+            stop()
+            setVideoLoading(false)
+            setErrorMsg(`❌ 视频生成失败${task.failReason ? '：' + task.failReason : ''}`)
+          }
+        } catch (e) { console.warn(e) }
+      }, 3000)
+    } catch (e) {
+      console.error(e)
+      setVideoLoading(false)
+      setErrorMsg('❌ 视频生成请求失败')
+    }
+  }
 
   async function handleAction(btnId: string, actionType: 'upsample' | 'variation', label: string) {
     if (!currentItem) return
@@ -396,24 +432,54 @@ function MJImageSection({ initialPrompt, initialImageUrl, initialTaskId, mode, c
         </div>
       )}
 
-      {/* U1-U4 */}
-      <div className="grid grid-cols-4 gap-2">
-        {quads.map(q => (
-          <button
-            key={q.id}
-            onClick={() => handleAction(q.id, 'upsample', q.label)}
-            disabled={!!loadingId}
-            className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105 disabled:opacity-50"
-            style={{
-              background: loadingId === q.id ? `linear-gradient(135deg, ${color1}, ${color2})` : `linear-gradient(135deg, ${color1}50, ${color2}50)`,
-              color: 'white', border: `1px solid ${color1}60`,
-              boxShadow: `0 0 10px ${color1}30`,
-            }}
-          >
-            {loadingId === q.id ? '↻' : q.label}
-          </button>
-        ))}
-      </div>
+      {/* U1-U4 或 视频按钮 */}
+      {hasUpscale && !videoUrl ? (
+        <div className="grid grid-cols-4 gap-2">
+          {[1, 2, 3, 4].map(i => (
+            <button
+              key={`video-${i}`}
+              onClick={() => {
+                const upscaleItem = history.find(item => item.type === 'upscale' && item.label === `U${i}`)
+                if (upscaleItem) handleVideo(upscaleItem.imageUrl)
+              }}
+              disabled={!!videoLoading}
+              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105 disabled:opacity-50"
+              style={{
+                background: videoLoading ? `linear-gradient(135deg, ${color1}, ${color2})` : `linear-gradient(135deg, #FF6B6B50, #FFE66D50)`,
+                color: 'white', border: `1px solid #FF6B6B60`,
+                boxShadow: `0 0 10px #FF6B6B30`,
+              }}
+            >
+              {videoLoading ? '↻' : `Video ${i}`}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-4 gap-2">
+          {quads.map(q => (
+            <button
+              key={q.id}
+              onClick={() => handleAction(q.id, 'upsample', q.label)}
+              disabled={!!loadingId}
+              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105 disabled:opacity-50"
+              style={{
+                background: loadingId === q.id ? `linear-gradient(135deg, ${color1}, ${color2})` : `linear-gradient(135deg, ${color1}50, ${color2}50)`,
+                color: 'white', border: `1px solid ${color1}60`,
+                boxShadow: `0 0 10px ${color1}30`,
+              }}
+            >
+              {loadingId === q.id ? '↻' : q.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 视频预览 */}
+      {videoUrl && (
+        <div className="rounded-lg overflow-hidden" style={{ border: `1px solid #FF6B6B40` }}>
+          <video src={videoUrl} controls className="w-full" />
+        </div>
+      )}
 
       {/* V1-V4 */}
       <div className="grid grid-cols-4 gap-2">

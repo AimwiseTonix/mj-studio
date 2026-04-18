@@ -220,3 +220,17 @@ export async function cancelTask(taskId: string, mode: SpeedMode = 'fast') {
   })
   return safeJson(res)
 }
+
+// 提交视频生成：POST /mj/submit/video
+export async function submitVideo(
+  imageUrl: string,
+  mode: SpeedMode = 'fast'
+) {
+  console.log('[MJ submitVideo]', { imageUrl, mode })
+  const res = await fetch(`${getBaseUrl(mode)}/submit/video`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ imageUrl }),
+  })
+  return safeJson(res)
+}
