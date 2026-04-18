@@ -285,8 +285,8 @@ function MJImageSection({ initialPrompt, initialImageUrl, initialTaskId, mode, c
             const newItem: HistoryItem = {
               id: `${actionType}-${Date.now()}`,
               prompt: currentItem.prompt,
-              imageUrl: task.imageUrl,
-              taskId: newId,
+              imageUrl: task.imageUrl as string,
+              taskId: newId as string,
               type: actionType === 'upsample' ? 'upscale' : 'variation',
               label,
               time: Date.now(),
@@ -318,12 +318,12 @@ function MJImageSection({ initialPrompt, initialImageUrl, initialTaskId, mode, c
             setHistory(prev => [...prev, {
               id: `regen-${Date.now()}`,
               prompt: currentItem.prompt,
-              imageUrl: task.imageUrl,
-              taskId: newId,
+              imageUrl: task.imageUrl as string,
+              taskId: newId as string,
               type: 'imagine',
               label: '重新生成',
               time: Date.now(),
-            }])
+            } as HistoryItem])
           } else if (task.status === 'FAILURE') {
             stop()
             setLoadingId(null)
