@@ -30,38 +30,47 @@ const ZODIAC_COLORS: [string, string][] = [
 // ============================================================
 // 提示词
 // ============================================================
-const DESIGN_PROMPT = `你是角色概念设计师，专注于将主题描述转化为详细的视觉设计方案。
+const DESIGN_PROMPT = `你是顶级幻想角色概念设计师，专注于将主题转化为华丽梦幻的女性角色视觉设计方案。
 输出12星座完整方案，**所有角色必须为女性形象**。
-**核心要求：唯美第一，中景/特写为主，避免全景**
+
+**核心要求：**
+- 极度复杂、梦幻、华丽的视觉设计
+- 背景必须详细：星空、宫殿、神秘森林、梦幻云端、水晶洞穴等奇幻场景
+- 角色与背景完美融合，营造沉浸式幻想氛围
+- 细节丰富：光效、粒子、飘落的花瓣/雪花/星尘
+
 格式：
 ## [星座名] - [角色标题]
-**人设概念：** [一句女性角色定位]
-**视觉描述：** [中景或特写镜头，女性角色有具体动作/姿态，场景简洁唯美，CG质感]
-**服装设计：** [唯美女性服装描述]
-**标志性道具：** [女性化道具]
-**性格标签：** [3-5个女性角色性格关键词]
-**配色方案：** [主色调列表]
+**人设概念：** [女性角色定位，1-2句]
+**视觉描述：** [复杂梦幻场景背景 + 女性角色在中景/特写中的姿态动作，包含CG质感、光效、氛围描写]
+**服装设计：** [华丽梦幻女性服装，包含材质、光效、装饰细节]
+**标志性道具：** [唯美女性化道具，带有魔法/梦幻属性]
+**场景背景：** [详细奇幻背景描述：天空、建筑、自然元素、光效]
+**性格标签：** [4-5个女性角色性格关键词]
+**配色方案：** [5-6个主色调，形成梦幻渐变]
 ---
 只输出星座方案，不要额外解释。`
 
-const MJ_PROMPT_PROMPT = `You are an MJ prompt generator. Convert character design descriptions into pure English MJ prompts only. Output nothing else.
+const MJ_PROMPT_PROMPT = `You are a professional MJ prompt engineer. Convert character design descriptions into ONLY pure English prompts for Midjourney. Absolutely NO Chinese characters, NO quotes, NO dashes, NO special symbols except the final double-dash --.
 
-## Rules
-- Beautiful first: beautiful, ethereal, elegant, graceful, exquisite
-- Medium shot or close-up only: medium shot, close-up portrait, bust shot. NO wide shot, NO full body
-- Must have action/pose: female character with specific gestures like holding props, turning, looking back, raising hand
-- Simple scene: simple background, minimalist setting
-- Ethereal lighting: soft lighting, golden hour, rim lighting, ethereal glow
+## STRICT RULES
+1. PURE ENGLISH ONLY - no Chinese, no Japanese, no Korean, no quotes "", no dashes --
+2. NO special characters except the final -- parameter separator
+3. Use commas instead of dashes or other separators
+4. Medium shot or close-up portrait ONLY - NO wide shot, NO full body
+5. Complex and dreamy: ethereal, fantasy, magical, mystical elements
 
-## Format
-- Pure English MJ prompt ONLY, no explanation, no quotes, no special characters except the final --
-- Structure: female subject with action, medium or close-up shot, ethereal style, soft lighting, simple background, quality params
-- Must include: beautiful female, elegant pose, medium shot, close-up portrait, ethereal, soft lighting, cinematic, photorealistic, CG art, realistic
-- Parameters: --ar 16:9 --v 7 --style raw
-- Use :: for weight emphasis, e.g. elegant posture::1.2
+## Structure (use commas as separators)
+[Main subject], [detailed appearance], [complex dreamy background], [magical atmosphere], [ethereal lighting], [pose/action], [CG style], [quality settings]
 
-## Example
-beautiful female mage with magical staff, elegant pose holding crystal orb, medium close-up portrait, ethereal soft lighting, intricate magical dress, simple mystical background, cinematic, photorealistic, CG art, realistic, 8k --ar 16:9 --v 7 --style raw`
+## Must Include Keywords
+beautiful female, ethereal, elegant, graceful, gorgeous, intricate details, magical, fantasy, dreamy, mystical, soft lighting, cinematic, photorealistic, CG art, realistic, 8k, medium shot, close-up portrait, detailed fantasy background
+
+## Parameters
+--ar 16:9 --v 7 --style raw
+
+## Example Output (note: ONLY commas, NO quotes, NO dashes except final --)
+beautiful ethereal female sorceress with long flowing hair, gorgeous ornate magical dress covered in glowing runes, standing in front of a grand fantasy castle at twilight with stars and aurora in the sky, magical particles floating around, ethereal soft rim lighting, confident elegant pose, detailed intricate fantasy architecture, cinematic composition, photorealistic CG art, 8k --ar 16:9 --v 7 --style raw`
 
 // ============================================================
 // 工具函数
@@ -474,7 +483,7 @@ interface CardData { name: string; content: string; index: number }
 
 function ZodiacCard({ card, mode, promptState, onGenPrompt, onGenImage }: {
   card: CardData; mode: SpeedMode
-  promptState: { prompt: string; promptState: 'idle' | 'loading' | 'done'; imageUrl?: string; imageLoading?: boolean; taskId?: string }
+  promptState: { prompt: string; promptState: 'idle' | 'loading' | 'done'; imageUrl?: string; imageLoading?: boolean; taskId?: string; imageError?: string }
   onGenPrompt: () => void; onGenImage: () => void
 }) {
   const [c1, c2] = ZODIAC_COLORS[card.index % 12]
@@ -678,6 +687,26 @@ function ZodiacCard({ card, mode, promptState, onGenPrompt, onGenImage }: {
             <span className="animate-pulse">⏳</span> 图片生成中...
           </div>
         )}
+
+        {/* 图片生成失败 */}
+        {promptState.imageError && (
+          <div className="mt-2 p-3 rounded-lg" style={{ background: '#2a1a1a', border: '1px solid #ff4444' }}>
+            <div className="flex items-center gap-2 text-sm" style={{ color: '#ff6b6b' }}>
+              <span>❌</span>
+              <span className="font-medium">生成失败</span>
+            </div>
+            <div className="mt-1 text-xs" style={{ color: '#999' }}>
+              {promptState.imageError}
+            </div>
+            <button
+              onClick={() => handleGenImage(card.name, promptState.prompt)}
+              className="mt-2 w-full py-2 rounded-lg text-sm font-medium transition-all hover:scale-105"
+              style={{ background: `linear-gradient(135deg, ${c1}, ${c2})`, color: 'white' }}
+            >
+              🔄 重试
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -694,7 +723,7 @@ export default function App() {
   const [mode, setMode] = useState<SpeedMode>('fast')
   const [promptStates, setPromptStates] = useState<Record<string, {
     prompt: string; promptState: 'idle' | 'loading' | 'done'
-    imageUrl?: string; imageLoading?: boolean; taskId?: string
+    imageUrl?: string; imageLoading?: boolean; taskId?: string; imageError?: string
   }>>({})
   const cardsContainerRef = useRef<HTMLDivElement>(null)
 
@@ -744,22 +773,31 @@ export default function App() {
   }
 
   async function handleGenImage(name: string, prompt: string) {
-    setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: true } }))
+    setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: true, imageError: undefined } }))
     try {
       const res = await submitImagine(prompt, mode)
       const taskId = res.result ?? res.taskId
-      if (!taskId) return
+      if (!taskId) {
+        setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageError: '任务ID获取失败' } }))
+        return
+      }
       setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: true, taskId } }))
       const poll = setInterval(async () => {
         try {
           const task = await getTask(taskId, mode)
           if (task.status === 'SUCCESS' && task.imageUrl) {
             clearInterval(poll)
-            setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageUrl: task.imageUrl } }))
+            setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageUrl: task.imageUrl, imageError: undefined } }))
+          } else if (task.status === 'FAILURE') {
+            clearInterval(poll)
+            setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageError: task.failReason || '生成失败' } }))
           }
         } catch (e) { /* ignore */ }
       }, 3000)
-    } catch (e) { console.error(e) }
+    } catch (e: any) {
+      console.error(e)
+      setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageError: e?.message || '网络错误' } }))
+    }
   }
 
   return (
