@@ -699,7 +699,7 @@ function ZodiacCard({ card, mode, promptState, onGenPrompt, onGenImage }: {
               {promptState.imageError}
             </div>
             <button
-              onClick={() => onGenImage(card.name, promptState.prompt)}
+              onClick={onGenImage}
               className="mt-2 w-full py-2 rounded-lg text-sm font-medium transition-all hover:scale-105"
               style={{ background: `linear-gradient(135deg, ${c1}, ${c2})`, color: 'white' }}
             >
