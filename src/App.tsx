@@ -110,6 +110,7 @@ function ParticleBackground() {
     const particles: { x: number; y: number; vx: number; vy: number; size: number; color: string; alpha: number }[] = []
 
     function resize() {
+      if (!canvas) return
       canvas.width = window.innerWidth
       canvas.height = window.innerHeight
     }
@@ -117,6 +118,7 @@ function ParticleBackground() {
     window.addEventListener('resize', resize)
 
     for (let i = 0; i < 80; i++) {
+      if (!canvas) continue
       particles.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
@@ -129,6 +131,7 @@ function ParticleBackground() {
     }
 
     function animate() {
+      if (!canvas || !ctx) return
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
       particles.forEach(p => {
@@ -289,7 +292,7 @@ function MJImageSection({ initialPrompt, initialImageUrl, initialTaskId, mode, c
               time: Date.now(),
             }
             setHistory(prev => [...prev, newItem])
-          } else if (task.status === 'FAILED') {
+          } else if (task.status === 'FAILURE') {
             stop()
             setLoadingId(null)
             setErrorMsg(`❌ ${label}失败${task.failReason ? '：' + task.failReason : ''}`)
@@ -321,7 +324,7 @@ function MJImageSection({ initialPrompt, initialImageUrl, initialTaskId, mode, c
               label: '重新生成',
               time: Date.now(),
             }])
-          } else if (task.status === 'FAILED') {
+          } else if (task.status === 'FAILURE') {
             stop()
             setLoadingId(null)
             setErrorMsg(`❌ 重新生成失败${task.failReason ? '：' + task.failReason : ''}`)
