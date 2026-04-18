@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { chatStream, type ChatMessage } from './gemini'
-import { submitImagine, getTask, submitAction, type SpeedMode } from './api'
+import { submitImagine, getTask, submitAction, submitVideo, type SpeedMode } from './api'
 
 // ============================================================
 // 常量
@@ -299,7 +299,7 @@ function MJImageSection({ initialPrompt, initialImageUrl, initialTaskId, mode, c
           if (task.status === 'SUCCESS' && (task.videoUrl || task.gifUrl)) {
             stop()
             setVideoLoading(false)
-            setVideoUrl(task.videoUrl || task.gifUrl)
+            setVideoUrl((task.videoUrl || task.gifUrl) as string)
           } else if (task.status === 'FAILURE') {
             stop()
             setVideoLoading(false)
