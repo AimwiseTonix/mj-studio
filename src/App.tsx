@@ -42,7 +42,7 @@ function ImagePreview({ url, onClose }: { url: string; onClose: () => void }) {
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black" onClick={onClose}>
-      <button onClick={onClose} className="absolute top-4 right-4 z-10 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:scale-105" style={{ background: '#333', border: '1px solid #555' }}>
+      <button onClick={onClose} className="absolute top-4 right-4 z-10 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:brightness-110 hover:shadow-lg" style={{ background: '#333', border: '1px solid #555' }}>
         ✕ 关闭
       </button>
       <img src={url} alt="预览" className="w-full h-full object-contain" onClick={e => e.stopPropagation()} />
@@ -74,7 +74,7 @@ function TaskCard({ task, onAction, onVideo, mode }: {
               <button
                 key={`vid-${i}`}
                 onClick={() => onVideo(task.imageUrl!)}
-                className="text-xs py-1.5 rounded-lg font-bold transition-all hover:brightness-110"
+                className="text-xs py-1.5 rounded-lg font-bold transition-all hover:brightness-110 hover:shadow-lg"
                 style={{ background: 'linear-gradient(135deg, #FF6B6B50, #FFE66D50)', color: 'white', border: '1px solid #FF6B6B60' }}
               >
                 Video {i}
@@ -477,8 +477,7 @@ ${mjPrompt}`
               onClick={handleGenerateMJ}
               disabled={genLoading || !mjPrompt.trim()}
               className="flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:brightness-110 hover:shadow-lg disabled:opacity-50"
-              style={{ background: 'linear-gradient(135deg, #CC33FF, #FF3366)', color: 'white', border: '1px solid #FF336640' }}
-              style={{ background: genLoading ? '#333' : 'linear-gradient(135deg, #6633FF, #CC33FF)', color: 'white' }}
+              style={{ background: genLoading ? '#333' : 'linear-gradient(135deg, #6633FF, #CC33FF)', color: 'white', border: '1px solid #6633FF60' }}
             >
               {genLoading ? '↻ 生成中...' : '🎨 生成图片'}
             </button>
