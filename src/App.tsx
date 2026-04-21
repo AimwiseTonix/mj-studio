@@ -74,7 +74,7 @@ function TaskCard({ task, onAction, onVideo, mode }: {
               <button
                 key={`vid-${i}`}
                 onClick={() => onVideo(task.imageUrl!)}
-                className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105"
+                className="text-xs py-1.5 rounded-lg font-bold transition-all hover:brightness-110"
                 style={{ background: 'linear-gradient(135deg, #FF6B6B50, #FFE66D50)', color: 'white', border: '1px solid #FF6B6B60' }}
               >
                 Video {i}
@@ -102,8 +102,8 @@ function TaskCard({ task, onAction, onVideo, mode }: {
             <button
               key={label}
               onClick={() => onAction(task.id, 'upsample', label)}
-              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105"
-              style={{ background: 'linear-gradient(135deg, #6633FF50, #CC33FF50)', color: 'white', border: '1px solid #6633FF60' }}
+              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:brightness-110 hover:shadow-lg"
+              style={{ background: 'linear-gradient(135deg, #6633FF50, #CC33FF50)', color: 'white', border: '1px solid #6633FF80', boxShadow: '0 0 10px #6633FF40' }}
             >
               {label}
             </button>
@@ -114,8 +114,8 @@ function TaskCard({ task, onAction, onVideo, mode }: {
             <button
               key={label}
               onClick={() => onAction(task.id, 'variation', label)}
-              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105"
-              style={{ background: 'linear-gradient(135deg, #33CCFF50, #33FFCC50)', color: 'white', border: '1px solid #33CCFF60' }}
+              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:brightness-110 hover:shadow-lg"
+              style={{ background: 'linear-gradient(135deg, #33CCFF50, #33FFCC50)', color: 'white', border: '1px solid #33CCFF80', boxShadow: '0 0 10px #33CCFF40' }}
             >
               {label}
             </button>
@@ -421,8 +421,8 @@ ${mjPrompt}`
             <button
               onClick={handleSend}
               disabled={chatLoading || !input.trim()}
-              className="px-4 rounded-lg font-medium transition-all hover:scale-105 disabled:opacity-50 disabled:hover:scale-100"
-              style={{ background: 'linear-gradient(135deg, #6633FF, #CC33FF)', color: 'white' }}
+              className="px-4 rounded-lg font-medium transition-all hover:brightness-110 hover:shadow-lg disabled:opacity-50 disabled:hover:scale-100"
+              style={{ background: 'linear-gradient(135deg, #6633FF, #CC33FF)', color: 'white', border: '1px solid #6633FF40' }}
             >
               {chatLoading ? '↻' : '➤'}
             </button>
@@ -468,15 +468,16 @@ ${mjPrompt}`
             <button
               onClick={handleConvertToMJ}
               disabled={mjPromptLoading || !mjPrompt.trim()}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-all hover:scale-105 disabled:opacity-50"
-              style={{ background: '#1a1a2e', color: '#ccc', border: '1px solid #6633FF40' }}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110 hover:shadow-lg disabled:opacity-50"
+              style={{ background: '#1a1a2e', color: '#ccc', border: '1px solid #6633FF60' }}
             >
               {mjPromptLoading ? '↻ 转化中...' : '✨ 转为MJ提示词'}
             </button>
             <button
               onClick={handleGenerateMJ}
               disabled={genLoading || !mjPrompt.trim()}
-              className="flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:scale-105 disabled:opacity-50"
+              className="flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:brightness-110 hover:shadow-lg disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg, #CC33FF, #FF3366)', color: 'white', border: '1px solid #FF336640' }}
               style={{ background: genLoading ? '#333' : 'linear-gradient(135deg, #6633FF, #CC33FF)', color: 'white' }}
             >
               {genLoading ? '↻ 生成中...' : '🎨 生成图片'}
