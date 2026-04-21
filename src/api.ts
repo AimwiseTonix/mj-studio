@@ -140,6 +140,21 @@ export async function submitAction(
   return safeJson(res)
 }
 
+// 直接使用完整customId提交action
+export async function submitActionCustom(
+  taskId: string,
+  customId: string,
+  mode: SpeedMode = 'fast'
+) {
+  console.log('[MJ submitActionCustom]', { taskId, customId })
+  const res = await fetch(`${getBaseUrl(mode)}/submit/action`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ taskId, customId }),
+  })
+  return safeJson(res)
+}
+
 // ==================== 任务查询 ====================
 
 // 任务详情：通过批量条件查询 POST /mj/task/list-by-condition

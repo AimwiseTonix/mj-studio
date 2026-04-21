@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { chatStream, chatOnce, type ChatMessage } from './gemini'
-import { submitImagine, getTask, submitAction, submitVideo, type SpeedMode } from './api'
+import { submitImagine, getTask, submitAction, submitVideo, submitActionCustom, type SpeedMode } from './api'
 
 // ============================================================
 // 类型
@@ -68,16 +68,16 @@ function TaskCard({ task, onAction, onVideo, mode }: {
     // 如果是upscale/video结果，显示视频按钮
     if (task.action === 'upscale' && !task.videoUrl) {
       return (
-        <div className="space-y-2">
-          <div className="grid grid-cols-4 gap-2">
+        <div className="mt-1">
+          <div className="grid grid-cols-4 gap-1">
             {[1, 2, 3, 4].map(i => (
               <button
                 key={`vid-${i}`}
                 onClick={() => onVideo(task.imageUrl!)}
-                className="text-xs py-1.5 rounded-lg font-bold transition-all hover:brightness-110 hover:shadow-lg"
+                className="text-xs py-1 rounded font-bold transition-all hover:brightness-110"
                 style={{ background: 'linear-gradient(135deg, #FF6B6B50, #FFE66D50)', color: 'white', border: '1px solid #FF6B6B60' }}
               >
-                Video {i}
+                Vid{i}
               </button>
             ))}
           </div>
@@ -96,28 +96,28 @@ function TaskCard({ task, onAction, onVideo, mode }: {
 
     // 正常图片显示U1-U4和V1-V4
     return (
-      <div className="space-y-2">
-        <div className="grid grid-cols-4 gap-2">
-          {['U1', 'U2', 'U3', 'U4'].map((label, i) => (
+      <div className="mt-1 space-y-1">
+        <div className="grid grid-cols-4 gap-1">
+          {[1, 2, 3, 4].map(i => (
             <button
-              key={label}
-              onClick={() => onAction(task.id, 'upsample', label)}
-              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:brightness-110 hover:shadow-lg"
-              style={{ background: 'linear-gradient(135deg, #6633FF50, #CC33FF50)', color: 'white', border: '1px solid #6633FF80', boxShadow: '0 0 10px #6633FF40' }}
+              key={`U${i}`}
+              onClick={() => onAction(task.id, 'upsample', i)}
+              className="text-xs py-1 rounded font-bold transition-all hover:brightness-110"
+              style={{ background: 'linear-gradient(135deg, #6633FF50, #CC33FF50)', color: 'white', border: '1px solid #6633FF80' }}
             >
-              {label}
+              {`U${i}`}
             </button>
           ))}
         </div>
-        <div className="grid grid-cols-4 gap-2">
-          {['V1', 'V2', 'V3', 'V4'].map((label, i) => (
+        <div className="grid grid-cols-4 gap-1">
+          {[1, 2, 3, 4].map(i => (
             <button
-              key={label}
-              onClick={() => onAction(task.id, 'variation', label)}
-              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:brightness-110 hover:shadow-lg"
-              style={{ background: 'linear-gradient(135deg, #33CCFF50, #33FFCC50)', color: 'white', border: '1px solid #33CCFF80', boxShadow: '0 0 10px #33CCFF40' }}
+              key={`V${i}`}
+              onClick={() => onAction(task.id, 'variation', i)}
+              className="text-xs py-1 rounded font-bold transition-all hover:brightness-110"
+              style={{ background: 'linear-gradient(135deg, #33CCFF50, #33FFCC50)', color: 'white', border: '1px solid #33CCFF80' }}
             >
-              {label}
+              {`V${i}`}
             </button>
           ))}
         </div>
@@ -126,27 +126,27 @@ function TaskCard({ task, onAction, onVideo, mode }: {
   }
 
   return (
-    <div className="rounded-xl p-4 transition-all" style={{ background: '#1a1a2e', border: '1px solid #2a2a4e' }}>
+    <div className="rounded-lg p-2 transition-all" style={{ background: '#1a1a2e', border: '1px solid #2a2a4e' }}>
       {/* 提示词 */}
-      <div className="text-xs text-gray-400 mb-2 line-clamp-2">{task.prompt}</div>
+      <div className="text-xs text-gray-400 mb-1 line-clamp-1">{task.prompt}</div>
 
       {/* 状态/图片 */}
       {task.status === 'loading' && (
-        <div className="flex items-center justify-center h-32 rounded-lg" style={{ background: '#0a0a15' }}>
-          <span className="animate-spin text-2xl">↻</span>
+        <div className="flex items-center justify-center h-16 rounded" style={{ background: '#0a0a15' }}>
+          <span className="animate-spin text-lg">↻</span>
         </div>
       )}
 
       {task.status === 'failed' && (
-        <div className="p-3 rounded-lg text-red-400 text-sm" style={{ background: '#FF336615' }}>
-          ❌ 生成失败{task.failReason ? `：${task.failReason}` : ''}
+        <div className="p-2 rounded text-red-400 text-xs" style={{ background: '#FF336615' }}>
+          ❌ 失败{task.failReason ? `：${task.failReason}` : ''}
         </div>
       )}
 
       {task.imageUrl && task.status === 'success' && (
         <>
-          <div className="rounded-lg overflow-hidden cursor-pointer" onClick={() => setPreviewUrl(task.imageUrl!)}>
-            <img src={task.imageUrl} alt="生成结果" className="w-full" />
+          <div className="rounded overflow-hidden cursor-pointer" onClick={() => setPreviewUrl(task.imageUrl!)}>
+            <img src={task.imageUrl} alt="结果" className="w-full" />
           </div>
           {renderActions()}
         </>
@@ -291,21 +291,29 @@ ${mjPrompt}`
   }
 
   // U/V操作
-  async function handleAction(taskId: string, action: string, label: string) {
+  async function handleAction(taskId: string, action: string, index: number) {
     const parentTask = tasks.find(t => t.id === taskId)
     if (!parentTask?.imageUrl) return
+
+    // 从parentTask的buttons获取完整的customId
+    const btn = parentTask.buttons?.[index - 1]
+    if (!btn?.customId) {
+      console.error('[handleAction] No button customId found', { index, buttons: parentTask.buttons })
+      return
+    }
 
     const newTask: Task = {
       id: `task-${Date.now()}`,
       prompt: parentTask.prompt,
       status: 'loading',
       action,
-      label
+      label: btn.label
     }
     setTasks(prev => [newTask, ...prev])
 
     try {
-      const res = await submitAction(parentTask.id, action, parseInt(label.replace(/\D/g, '')), mode)
+      // 使用按钮的完整customId
+      const res = await submitActionCustom(parentTask.id, btn.customId, mode)
       const newId = res.result ?? res.taskId
       if (!newId) throw new Error('No task ID')
 
@@ -493,7 +501,7 @@ ${mjPrompt}`
               <p>输入提示词开始创作</p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="grid grid-cols-5 gap-3">
               {tasks.map(task => (
                 <TaskCard
                   key={task.id}
