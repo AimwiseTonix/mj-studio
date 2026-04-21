@@ -1,203 +1,37 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { chatStream, type ChatMessage } from './gemini'
+import { chatStream, chatOnce, type ChatMessage } from './gemini'
 import { submitImagine, getTask, submitAction, submitVideo, type SpeedMode } from './api'
 
 // ============================================================
-// 常量
+// 类型
 // ============================================================
-const ZODIAC_SIGNS = [
-  '白羊座','金牛座','双子座','巨蟹座',
-  '狮子座','处女座','天秤座','天蝎座',
-  '射手座','摩羯座','水瓶座','双鱼座',
-]
+interface Message {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  time: number
+}
 
-const ZODIAC_COLORS: [string, string][] = [
-  ['#FF3366','#FF6B8A'],
-  ['#FF9933','#FFB366'],
-  ['#FFCC00','#FFD633'],
-  ['#33CC66','#66D98A'],
-  ['#33CCFF','#66D9FF'],
-  ['#3366FF','#668AFF'],
-  ['#6633FF','#8066FF'],
-  ['#CC33FF','#D966FF'],
-  ['#FF3366','#FF4D94'],
-  ['#00CCCC','#33D9D9'],
-  ['#33CCFF','#4DD9FF'],
-  ['#FF99CC','#FFB3D9'],
-]
-
-// ============================================================
-// 提示词
-// ============================================================
-const DESIGN_PROMPT = `你是顶级幻想角色概念设计师，专注于将主题转化为华丽梦幻的女性角色视觉设计方案。
-输出12星座完整方案，**所有角色必须为女性形象**。
-
-**核心要求：**
-- 极度复杂、梦幻、华丽的视觉设计
-- 背景必须详细：星空、宫殿、神秘森林、梦幻云端、水晶洞穴等奇幻场景
-- 角色与背景完美融合，营造沉浸式幻想氛围
-- 细节丰富：光效、粒子、飘落的花瓣/雪花/星尘
-
-格式：
-## [星座名] - [角色标题]
-**人设概念：** [女性角色定位，1-2句]
-**视觉描述：** [复杂梦幻场景背景 + 女性角色在中景/特写中的姿态动作，包含CG质感、光效、氛围描写]
-**服装设计：** [华丽梦幻女性服装，包含材质、光效、装饰细节]
-**标志性道具：** [唯美女性化道具，带有魔法/梦幻属性]
-**场景背景：** [详细奇幻背景描述：天空、建筑、自然元素、光效]
-**性格标签：** [4-5个女性角色性格关键词]
-**配色方案：** [5-6个主色调，形成梦幻渐变]
----
-只输出星座方案，不要额外解释。`
-
-const MJ_PROMPT_PROMPT = `You are a professional MJ prompt engineer. Convert character design descriptions into ONLY pure English prompts for Midjourney. Absolutely NO Chinese characters, NO quotes, NO dashes, NO special symbols except the final double-dash --.
-
-## STRICT RULES
-1. PURE ENGLISH ONLY - no Chinese, no Japanese, no Korean, no quotes "", no dashes --
-2. NO special characters except the final -- parameter separator
-3. Use commas instead of dashes or other separators
-4. Medium shot or close-up portrait ONLY - NO wide shot, NO full body
-5. Complex and dreamy: ethereal, fantasy, magical, mystical elements
-
-## Structure (use commas as separators)
-[Main subject], [detailed appearance], [complex dreamy background], [magical atmosphere], [ethereal lighting], [pose/action], [CG style], [quality settings]
-
-## Must Include Keywords
-beautiful female, ethereal, elegant, graceful, gorgeous, intricate details, magical, fantasy, dreamy, mystical, soft lighting, cinematic, photorealistic, CG art, realistic, 8k, medium shot, close-up portrait, detailed fantasy background
-
-## Parameters
---ar 16:9 --v 7 --style raw
-
-## Example Output (note: ONLY commas, NO quotes, NO dashes except final --)
-beautiful ethereal female sorceress with long flowing hair, gorgeous ornate magical dress covered in glowing runes, standing in front of a grand fantasy castle at twilight with stars and aurora in the sky, magical particles floating around, ethereal soft rim lighting, confident elegant pose, detailed intricate fantasy architecture, cinematic composition, photorealistic CG art, 8k --ar 16:9 --v 7 --style raw`
-
-// ============================================================
-// 工具函数
-// ============================================================
-function parseZodiacCards(text: string): { name: string; content: string }[] {
-  if (!text || typeof text !== 'string') return []
-  const cards: { name: string; content: string }[] = []
-  try {
-    const signPattern = ZODIAC_SIGNS.join('|')
-    const regex = new RegExp(`((?:${signPattern}))`, 'gi')
-    const parts = text.split(regex)
-    for (let i = 1; i < parts.length; i += 2) {
-      const sign = parts[i] || ''
-      const content = (parts[i + 1] || '').trim()
-      if (sign && content) cards.push({ name: sign, content })
-    }
-  } catch (e) { /* ignore */ }
-
-  if (cards.length === 0) {
-    for (const sign of ZODIAC_SIGNS) {
-      const idx = text.indexOf(sign)
-      if (idx !== -1) {
-        const others = ZODIAC_SIGNS.filter(s => s !== sign).map(s => text.indexOf(s)).filter(i => i !== -1).sort((a, b) => a - b)
-        const end = others[0] ?? text.length
-        const content = text.slice(idx, end).trim()
-        if (content) cards.push({ name: sign, content })
-      }
-    }
-  }
-  return cards
+interface Task {
+  id: string
+  prompt: string
+  imageUrl?: string
+  videoUrl?: string
+  status: 'pending' | 'loading' | 'success' | 'failed'
+  failReason?: string
+  action?: string  // imagine, upscale, variation, video
+  label?: string   // U1, U2, V1, V2, etc
 }
 
 // ============================================================
-// 发光粒子背景
+// 子组件
 // ============================================================
-function ParticleBackground() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    let animationId: number
-    const particles: { x: number; y: number; vx: number; vy: number; size: number; color: string; alpha: number }[] = []
-
-    function resize() {
-      if (!canvas) return
-      canvas.width = window.innerWidth
-      canvas.height = window.innerHeight
-    }
-    resize()
-    window.addEventListener('resize', resize)
-
-    for (let i = 0; i < 80; i++) {
-      if (!canvas) continue
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx: (Math.random() - 0.5) * 0.6,
-        vy: (Math.random() - 0.5) * 0.6,
-        size: Math.random() * 2 + 1,
-        color: `hsl(${Math.random() * 360}, 80%, 60%)`,
-        alpha: Math.random() * 0.5 + 0.2,
-      })
-    }
-
-    function animate() {
-      if (!canvas || !ctx) return
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-      particles.forEach(p => {
-        p.x += p.vx
-        p.y += p.vy
-        if (p.x < 0 || p.x > canvas.width) p.vx *= -1
-        if (p.y < 0 || p.y > canvas.height) p.vy *= -1
-
-        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 4)
-        gradient.addColorStop(0, p.color)
-        gradient.addColorStop(1, 'transparent')
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.size * 4, 0, Math.PI * 2)
-        ctx.fillStyle = gradient
-        ctx.globalAlpha = p.alpha
-        ctx.fill()
-      })
-
-      ctx.globalAlpha = 0.1
-      for (let i = 0; i < particles.length; i++) {
-        for (let j = i + 1; j < particles.length; j++) {
-          const dx = particles[i].x - particles[j].x
-          const dy = particles[i].y - particles[j].y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < 150) {
-            ctx.beginPath()
-            ctx.moveTo(particles[i].x, particles[i].y)
-            ctx.lineTo(particles[j].x, particles[j].y)
-            ctx.strokeStyle = `rgba(150, 100, 255, ${1 - dist / 150})`
-            ctx.lineWidth = 0.5
-            ctx.stroke()
-          }
-        }
-      }
-
-      ctx.globalAlpha = 1
-      animationId = requestAnimationFrame(animate)
-    }
-
-    animate()
-    return () => {
-      window.removeEventListener('resize', resize)
-      cancelAnimationFrame(animationId)
-    }
-  }, [])
-
-  return <canvas ref={canvasRef} className="fixed inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }} />
-}
-
-// ============================================================
 // 全屏图片预览
-// ============================================================
 function ImagePreview({ url, onClose }: { url: string; onClose: () => void }) {
   useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
+    function handleKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', handleKey)
     document.body.style.overflow = 'hidden'
     return () => {
@@ -206,782 +40,473 @@ function ImagePreview({ url, onClose }: { url: string; onClose: () => void }) {
     }
   }, [onClose])
 
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center"
-      style={{ background: '#000' }}
-      onClick={onClose}
-    >
-      {/* 关闭按钮 */}
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 z-10 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:scale-105"
-        style={{ background: '#333', border: '1px solid #555' }}
-      >
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black" onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 z-10 px-4 py-2 rounded-lg text-white text-sm font-medium transition-all hover:scale-105" style={{ background: '#333', border: '1px solid #555' }}>
         ✕ 关闭
       </button>
-      <img
-        src={url}
-        alt="全屏预览"
-        className="w-full h-full object-contain"
-        style={{ cursor: 'pointer' }}
-        onClick={e => e.stopPropagation()}
-      />
-    </div>
+      <img src={url} alt="预览" className="w-full h-full object-contain" onClick={e => e.stopPropagation()} />
+    </div>,
+    document.body
   )
 }
 
-// ============================================================
-// 历史记录条目
-// ============================================================
-interface HistoryItem {
-  id: string
-  prompt: string
-  imageUrl: string
-  taskId: string
-  type: 'imagine' | 'upscale' | 'variation'
-  label: string
-  time: number
-}
-
-// ============================================================
-// MJ图片生成区 - 支持历史记录
-// ============================================================
-function MJImageSection({ initialPrompt, initialImageUrl, initialTaskId, mode, color1, color2 }: {
-  initialPrompt: string
-  initialImageUrl: string
-  initialTaskId: string
+// MJ任务卡片
+function TaskCard({ task, onAction, onVideo, mode }: {
+  task: Task
+  onAction: (taskId: string, action: string, label: string) => void
+  onVideo: (imageUrl: string) => void
   mode: SpeedMode
-  color1: string
-  color2: string
 }) {
-  const [history, setHistory] = useState<HistoryItem[]>([{
-    id: `init-${Date.now()}`,
-    prompt: initialPrompt,
-    imageUrl: initialImageUrl,
-    taskId: initialTaskId,
-    type: 'imagine',
-    label: '原始',
-    time: Date.now(),
-  }])
-  const [loadingId, setLoadingId] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [showHistory, setShowHistory] = useState(false)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [showUpscale, setShowUpscale] = useState(false)
 
-  const currentItem = history[history.length - 1]
+  // 任务完成后的操作按钮
+  const renderActions = () => {
+    if (!task.imageUrl || task.status !== 'success') return null
 
-  // 检查是否有upscale的结果，用于显示视频按钮
-  const hasUpscale = history.some(item => item.type === 'upscale')
-
-  function stop() {
-    if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
-  }
-
-  function clearError() { setErrorMsg(null) }
-
-  // 视频生成
-  const [videoLoading, setVideoLoading] = useState(false)
-  const [videoUrl, setVideoUrl] = useState<string | null>(null)
-
-  async function handleVideo(imageUrl: string) {
-    setVideoLoading(true)
-    setErrorMsg(null)
-    try {
-      const res = await submitVideo(imageUrl)
-      const videoId = res.result ?? res.taskId
-      if (!videoId) { setVideoLoading(false); return }
-      // 轮询视频任务状态
-      pollingRef.current = setInterval(async () => {
-        try {
-          const task = await getTask(videoId, mode)
-          if (task.status === 'SUCCESS' && (task.videoUrl || task.gifUrl)) {
-            stop()
-            setVideoLoading(false)
-            setVideoUrl((task.videoUrl || task.gifUrl) as string)
-          } else if (task.status === 'FAILURE') {
-            stop()
-            setVideoLoading(false)
-            setErrorMsg(`❌ 视频生成失败${task.failReason ? '：' + task.failReason : ''}`)
-          }
-        } catch (e) { console.warn(e) }
-      }, 3000)
-    } catch (e) {
-      console.error(e)
-      setVideoLoading(false)
-      setErrorMsg('❌ 视频生成请求失败')
-    }
-  }
-
-  async function handleAction(btnId: string, actionType: 'upsample' | 'variation', label: string) {
-    if (!currentItem) return
-    setLoadingId(btnId)
-    try {
-      const res = await submitAction(currentItem.taskId, actionType, parseInt(btnId), mode)
-      const newId = res.result ?? res.taskId
-      if (!newId) { setLoadingId(null); return }
-      pollingRef.current = setInterval(async () => {
-        try {
-          const task = await getTask(newId, mode)
-          if (task.status === 'SUCCESS' && task.imageUrl) {
-            stop()
-            setLoadingId(null)
-            const newItem: HistoryItem = {
-              id: `${actionType}-${Date.now()}`,
-              prompt: currentItem.prompt,
-              imageUrl: task.imageUrl as string,
-              taskId: newId as string,
-              type: actionType === 'upsample' ? 'upscale' : 'variation',
-              label,
-              time: Date.now(),
-            }
-            setHistory(prev => [...prev, newItem])
-          } else if (task.status === 'FAILURE') {
-            stop()
-            setLoadingId(null)
-            setErrorMsg(`❌ ${label}失败${task.failReason ? '：' + task.failReason : ''}`)
-          }
-        } catch (e) { console.warn(e) }
-      }, 3000)
-    } catch (e) { console.error(e); setLoadingId(null) }
-  }
-
-  async function handleRegenerate() {
-    if (!currentItem) return
-    setLoadingId('regen')
-    try {
-      const res = await submitImagine(currentItem.prompt, mode)
-      const newId = res.result ?? res.taskId
-      if (!newId) { setLoadingId(null); return }
-      pollingRef.current = setInterval(async () => {
-        try {
-          const task = await getTask(newId, mode)
-          if (task.status === 'SUCCESS' && task.imageUrl) {
-            stop()
-            setLoadingId(null)
-            setHistory(prev => [...prev, {
-              id: `regen-${Date.now()}`,
-              prompt: currentItem.prompt,
-              imageUrl: task.imageUrl as string,
-              taskId: newId as string,
-              type: 'imagine',
-              label: '重新生成',
-              time: Date.now(),
-            } as HistoryItem])
-          } else if (task.status === 'FAILURE') {
-            stop()
-            setLoadingId(null)
-            setErrorMsg(`❌ 重新生成失败${task.failReason ? '：' + task.failReason : ''}`)
-          }
-        } catch (e) { console.warn(e) }
-      }, 3000)
-    } catch (e) { console.error(e); setLoadingId(null) }
-  }
-
-  const quads = [
-    { id: '1', label: 'U1' },
-    { id: '2', label: 'U2' },
-    { id: '3', label: 'U3' },
-    { id: '4', label: 'U4' },
-  ]
-
-  const variations = [
-    { id: '1', label: 'V1' },
-    { id: '2', label: 'V2' },
-    { id: '3', label: 'V3' },
-    { id: '4', label: 'V4' },
-  ]
-
-  return (
-    <div className="mt-2 space-y-3">
-      {/* 当前提示词 */}
-      <div
-        className="p-2 rounded-lg text-xs font-mono leading-relaxed"
-        style={{ background: '#060610', color: '#aaa', border: `1px solid ${color1}25` }}
-      >
-        {currentItem?.prompt.slice(0, 80)}...
-      </div>
-
-      {/* 重新生成 */}
-      <button
-        onClick={handleRegenerate}
-        disabled={!!loadingId}
-        className="w-full text-xs py-1.5 rounded-lg font-medium transition-all hover:scale-105 disabled:opacity-50"
-        style={{ background: '#1a1a2e', color: '#ccc', border: `1px solid ${color1}40` }}
-      >
-        {loadingId === 'regen' ? '↻ 生成中...' : '🔄 重新生成'}
-      </button>
-
-      {/* 错误提示 */}
-      {errorMsg && (
-        <div className="flex items-center gap-2 p-2 rounded-lg text-xs" style={{ background: '#FF336615', border: '1px solid #FF336640', color: '#ff6b6b' }}>
-          <span>{errorMsg}</span>
-          <button onClick={clearError} className="ml-auto px-2 py-0.5 rounded text-white" style={{ background: '#333' }}>✕</button>
-        </div>
-      )}
-
-      {/* 当前图片 */}
-      {currentItem && (
-        <div
-          className="rounded-lg overflow-hidden cursor-pointer transition-all hover:brightness-110"
-          style={{ border: `1px solid ${color1}30` }}
-          onClick={() => setPreviewUrl(currentItem.imageUrl)}
-        >
-          <img src={currentItem.imageUrl} alt="当前" className="w-full block" />
-        </div>
-      )}
-
-      {/* U1-U4 或 视频按钮 */}
-      {hasUpscale && !videoUrl ? (
-        <div className="grid grid-cols-4 gap-2">
-          {[1, 2, 3, 4].map(i => (
-            <button
-              key={`video-${i}`}
-              onClick={() => {
-                const upscaleItem = history.find(item => item.type === 'upscale' && item.label === `U${i}`)
-                if (upscaleItem) handleVideo(upscaleItem.imageUrl)
-              }}
-              disabled={!!videoLoading}
-              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105 disabled:opacity-50"
-              style={{
-                background: videoLoading ? `linear-gradient(135deg, ${color1}, ${color2})` : `linear-gradient(135deg, #FF6B6B50, #FFE66D50)`,
-                color: 'white', border: `1px solid #FF6B6B60`,
-                boxShadow: `0 0 10px #FF6B6B30`,
-              }}
-            >
-              {videoLoading ? '↻' : `Video ${i}`}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-4 gap-2">
-          {quads.map(q => (
-            <button
-              key={q.id}
-              onClick={() => handleAction(q.id, 'upsample', q.label)}
-              disabled={!!loadingId}
-              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105 disabled:opacity-50"
-              style={{
-                background: loadingId === q.id ? `linear-gradient(135deg, ${color1}, ${color2})` : `linear-gradient(135deg, ${color1}50, ${color2}50)`,
-                color: 'white', border: `1px solid ${color1}60`,
-                boxShadow: `0 0 10px ${color1}30`,
-              }}
-            >
-              {loadingId === q.id ? '↻' : q.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* 视频预览 */}
-      {videoUrl && (
-        <div className="rounded-lg overflow-hidden" style={{ border: `1px solid #FF6B6B40` }}>
-          <video src={videoUrl} controls className="w-full" />
-        </div>
-      )}
-
-      {/* V1-V4 */}
-      <div className="grid grid-cols-4 gap-2">
-        {variations.map(v => (
-          <button
-            key={v.id}
-            onClick={() => handleAction(v.id, 'variation', v.label)}
-            disabled={!!loadingId}
-            className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105 disabled:opacity-50"
-            style={{
-              background: loadingId === v.id ? `linear-gradient(135deg, ${color1}, ${color2})` : `linear-gradient(135deg, ${color1}30, ${color2}30)`,
-              color: 'white', border: `1px solid ${color1}50`,
-              boxShadow: `0 0 10px ${color1}20`,
-            }}
-          >
-            {loadingId === v.id ? '↻' : v.label}
-          </button>
-        ))}
-      </div>
-
-      {/* 历史记录 */}
-      {history.length > 1 && (
-        <div className="pt-2" style={{ borderTop: `1px solid ${color1}20` }}>
-          <button
-            onClick={() => setShowHistory(v => !v)}
-            className="w-full text-xs py-1 mb-2 rounded transition-all"
-            style={{ color: color1 }}
-          >
-            📋 历史 ({history.length}) {showHistory ? '▲' : '▼'}
-          </button>
-          {showHistory && (
-            <div className="grid grid-cols-4 gap-2">
-              {history.map((item, idx) => (
-                <div
-                  key={item.id}
-                  className="relative group cursor-pointer rounded-lg overflow-hidden"
-                  style={{ border: `1px solid ${idx === history.length - 1 ? color1 : color1 + '30'}` }}
-                  onClick={() => setPreviewUrl(item.imageUrl)}
-                >
-                  <img src={item.imageUrl} alt={item.label} className="w-full aspect-square object-cover" />
-                  <div
-                    className="absolute bottom-0 left-0 right-0 text-xs py-1 text-center"
-                    style={{ background: `linear-gradient(transparent, ${color1}90)`, color: 'white' }}
-                  >
-                    {item.label}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 全屏预览 */}
-      {previewUrl && createPortal(
-        <ImagePreview url={previewUrl} onClose={() => setPreviewUrl(null)} />,
-        document.body
-      )}
-    </div>
-  )
-}
-
-// ============================================================
-// 单个星座卡片
-// ============================================================
-interface CardData { name: string; content: string; index: number }
-
-function ZodiacCard({ card, mode, promptState, onGenPrompt, onGenImage }: {
-  card: CardData; mode: SpeedMode
-  promptState: { prompt: string; promptState: 'idle' | 'loading' | 'done'; imageUrl?: string; imageLoading?: boolean; taskId?: string; imageError?: string }
-  onGenPrompt: () => void; onGenImage: () => void
-}) {
-  const [c1, c2] = ZODIAC_COLORS[card.index % 12]
-  const [expanded, setExpanded] = useState(false)
-
-  // 尝试解析各个字段
-  const lines = card.content.split('\n').filter(l => l.trim())
-  const visualMatch = card.content.match(/视觉描述[：:]\s*([^\n]+|[\s\S]*?)(?=\n\*\*|$)/i)
-  const colorMatch = card.content.match(/配色方案[：:]\s*([^\n]+)/i)
-  const tagMatch = card.content.match(/性格标签[：:]\s*([^\n]+)/i)
-  const clothMatch = card.content.match(/服装设计[：:]\s*([^\n]+)/i)
-  const propMatch = card.content.match(/标志性道具[：:]\s*([^\n]+)/i)
-
-  // 获取配色
-  const colors = colorMatch
-    ? colorMatch[1].split(/[,，、+＋#]/).map(c => c.trim()).filter(Boolean).filter(c => c.length > 0 && c.length < 20).slice(0, 5)
-    : []
-
-  // 清理配色
-  const cleanColors = colors.map(c => {
-    if (c.startsWith('#') || /^[0-9A-Fa-f]{6}$/.test(c)) return c
-    return null
-  }).filter(Boolean) as string[]
-
-  return (
-    <div
-      data-zodiac={card.index}
-      className="relative group rounded-2xl overflow-hidden transition-all duration-500 cursor-pointer"
-      style={{
-        background: `linear-gradient(145deg, ${c1}18, ${c2}10)`,
-        border: `1.5px solid ${c1}50`,
-        boxShadow: `0 0 25px ${c1}25, 0 0 50px ${c1}12, inset 0 0 25px ${c1}08`,
-        transform: 'translateY(0) scale(1)',
-        transition: 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)',
-      }}
-      onMouseEnter={e => {
-        const el = e.currentTarget
-        el.style.transform = 'translateY(-8px) scale(1.02)'
-        el.style.boxShadow = `0 20px 40px ${c1}30, 0 0 60px ${c1}15, inset 0 0 20px ${c1}10`
-        el.style.borderColor = `${c1}80`
-        el.style.zIndex = '20'
-      }}
-      onMouseLeave={e => {
-        const el = e.currentTarget
-        el.style.transform = 'translateY(0) scale(1)'
-        el.style.boxShadow = `0 0 25px ${c1}25, 0 0 50px ${c1}12, inset 0 0 25px ${c1}08`
-        el.style.borderColor = `${c1}50`
-        el.style.zIndex = ''
-      }}
-    >
-      {/* 顶部霓虹条 */}
-      <div
-        className="h-1"
-        style={{
-          background: `linear-gradient(90deg, ${c1}, ${c2}, ${c1})`,
-          boxShadow: `0 0 15px ${c1}`,
-        }}
-      />
-
-      <div className="p-4 space-y-3">
-        {/* 星座名 */}
-        <div className="flex items-center justify-between">
-          <span
-            className="inline-block text-white text-sm font-bold px-3 py-1 rounded-full"
-            style={{
-              background: `linear-gradient(135deg, ${c1}, ${c2})`,
-              boxShadow: `0 0 12px ${c1}60`,
-            }}
-          >
-            ✨ {card.name}
-          </span>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-xs px-2 py-1 rounded-lg transition-all"
-            style={{ color: '#888', background: '#1a1a2e' }}
-          >
-            {expanded ? '收起' : '展开'}
-          </button>
-        </div>
-
-        {/* 完整设计内容 */}
-        {expanded ? (
-          <div
-            className="text-xs leading-relaxed whitespace-pre-wrap p-3 rounded-lg"
-            style={{ background: '#080812', color: '#ccc', border: `1px solid ${c1}20`, maxHeight: '200px', overflowY: 'auto' }}
-          >
-            {card.content}
-          </div>
-        ) : (
-          <>
-            {/* 视觉描述（主要展示） */}
-            {visualMatch && (
-              <div className="text-xs text-gray-300 leading-relaxed">
-                🎨 {visualMatch[1].trim().slice(0, 100)}
-                {visualMatch[1].length > 100 && '...'}
-              </div>
-            )}
-
-            {/* 服装 */}
-            {clothMatch && (
-              <div className="text-xs" style={{ color: `${c1}dd` }}>
-                👗 {clothMatch[1].trim().slice(0, 60)}
-              </div>
-            )}
-
-            {/* 道具 */}
-            {propMatch && (
-              <div className="text-xs" style={{ color: `${c2}dd` }}>
-                🔮 {propMatch[1].trim().slice(0, 60)}
-              </div>
-            )}
-
-            {/* 性格标签 */}
-            {tagMatch && (
-              <div className="flex flex-wrap gap-1">
-                {tagMatch[1].split(/[,，、/]/).map((t, i) => t.trim()).filter(Boolean).slice(0, 4).map((t, i) => (
-                  <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: `${c1}20`, color: c2, border: `1px solid ${c1}40` }}>
-                    {t}
-                  </span>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* 配色条 */}
-        {(cleanColors.length > 0 || colors.length > 0) && (
-          <div className="flex gap-1">
-            {(cleanColors.length > 0 ? cleanColors : colors.slice(0, 4)).map((color, i) => (
-              <div
-                key={i}
-                className="h-5 flex-1 rounded border border-white/10"
-                style={{ backgroundColor: color.startsWith('#') ? color : '#1a1a2e' }}
-                title={color}
-              />
+    // 如果是upscale/video结果，显示视频按钮
+    if (task.action === 'upscale' && !task.videoUrl) {
+      return (
+        <div className="space-y-2">
+          <div className="grid grid-cols-4 gap-2">
+            {[1, 2, 3, 4].map(i => (
+              <button
+                key={`vid-${i}`}
+                onClick={() => onVideo(task.imageUrl!)}
+                className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105"
+                style={{ background: 'linear-gradient(135deg, #FF6B6B50, #FFE66D50)', color: 'white', border: '1px solid #FF6B6B60' }}
+              >
+                Video {i}
+              </button>
             ))}
           </div>
-        )}
-
-        {/* 操作按钮 */}
-        <div className="flex gap-2 pt-1">
-          <button
-            onClick={onGenPrompt}
-            disabled={promptState.promptState === 'loading'}
-            className="flex-1 text-xs py-2 rounded-xl font-bold transition-all hover:scale-105 disabled:opacity-50"
-            style={{
-              background: `linear-gradient(135deg, ${c1}, ${c2})`,
-              color: 'white',
-              boxShadow: `0 0 12px ${c1}40`,
-            }}
-          >
-            {promptState.promptState === 'loading' ? '生成中...' : '✨ 生成MJ提示词'}
-          </button>
-          {promptState.promptState === 'done' && (
-            <button
-              onClick={onGenImage}
-              disabled={promptState.imageLoading}
-              className="flex-1 text-xs py-2 rounded-xl font-bold transition-all hover:scale-105 disabled:opacity-50"
-              style={{
-                background: '#1a1a2e',
-                color: 'white',
-                border: `1px solid ${c1}50`,
-                boxShadow: `0 0 8px ${c1}20`,
-              }}
-            >
-              {promptState.imageLoading ? '生成中...' : '🎨 生成图片'}
-            </button>
-          )}
         </div>
+      )
+    }
 
-        {/* MJ提示词 - 固定高度5行 */}
-        {promptState.promptState === 'done' && promptState.prompt && (
-          <div
-            className="p-2 rounded-lg text-xs font-mono leading-relaxed overflow-hidden"
-            style={{
-              background: '#060610',
-              color: '#00ff88',
-              border: `1px solid ${c1}30`,
-              maxHeight: '6em',
-              overflowY: 'auto',
-            }}
-          >
-            {promptState.prompt}
-          </div>
-        )}
+    // 视频结果
+    if (task.videoUrl) {
+      return (
+        <div className="rounded-lg overflow-hidden" style={{ border: '1px solid #FF6B6B40' }}>
+          <video src={task.videoUrl} controls className="w-full" />
+        </div>
+      )
+    }
 
-        {/* MJ图片区 - 带历史记录 */}
-        {promptState.imageUrl && promptState.taskId && (
-          <MJImageSection
-            initialPrompt={promptState.prompt}
-            initialImageUrl={promptState.imageUrl}
-            initialTaskId={promptState.taskId}
-            mode={mode}
-            color1={c1}
-            color2={c2}
-          />
-        )}
-
-        {promptState.imageLoading && (
-          <div className="flex items-center gap-2 text-xs" style={{ color: '#888' }}>
-            <span className="animate-pulse">⏳</span> 图片生成中...
-          </div>
-        )}
-
-        {/* 图片生成失败 */}
-        {promptState.imageError && (
-          <div className="mt-2 p-3 rounded-lg" style={{ background: '#2a1a1a', border: '1px solid #ff4444' }}>
-            <div className="flex items-center gap-2 text-sm" style={{ color: '#ff6b6b' }}>
-              <span>❌</span>
-              <span className="font-medium">生成失败</span>
-            </div>
-            <div className="mt-1 text-xs" style={{ color: '#999' }}>
-              {promptState.imageError}
-            </div>
+    // 正常图片显示U1-U4和V1-V4
+    return (
+      <div className="space-y-2">
+        <div className="grid grid-cols-4 gap-2">
+          {['U1', 'U2', 'U3', 'U4'].map((label, i) => (
             <button
-              onClick={onGenImage}
-              className="mt-2 w-full py-2 rounded-lg text-sm font-medium transition-all hover:scale-105"
-              style={{ background: `linear-gradient(135deg, ${c1}, ${c2})`, color: 'white' }}
+              key={label}
+              onClick={() => onAction(task.id, 'upsample', label)}
+              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105"
+              style={{ background: 'linear-gradient(135deg, #6633FF50, #CC33FF50)', color: 'white', border: '1px solid #6633FF60' }}
             >
-              🔄 重试
+              {label}
             </button>
-          </div>
-        )}
+          ))}
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {['V1', 'V2', 'V3', 'V4'].map((label, i) => (
+            <button
+              key={label}
+              onClick={() => onAction(task.id, 'variation', label)}
+              className="text-xs py-1.5 rounded-lg font-bold transition-all hover:scale-105"
+              style={{ background: 'linear-gradient(135deg, #33CCFF50, #33FFCC50)', color: 'white', border: '1px solid #33CCFF60' }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
+    )
+  }
+
+  return (
+    <div className="rounded-xl p-4 transition-all" style={{ background: '#1a1a2e', border: '1px solid #2a2a4e' }}>
+      {/* 提示词 */}
+      <div className="text-xs text-gray-400 mb-2 line-clamp-2">{task.prompt}</div>
+
+      {/* 状态/图片 */}
+      {task.status === 'loading' && (
+        <div className="flex items-center justify-center h-32 rounded-lg" style={{ background: '#0a0a15' }}>
+          <span className="animate-spin text-2xl">↻</span>
+        </div>
+      )}
+
+      {task.status === 'failed' && (
+        <div className="p-3 rounded-lg text-red-400 text-sm" style={{ background: '#FF336615' }}>
+          ❌ 生成失败{task.failReason ? `：${task.failReason}` : ''}
+        </div>
+      )}
+
+      {task.imageUrl && task.status === 'success' && (
+        <>
+          <div className="rounded-lg overflow-hidden cursor-pointer" onClick={() => setPreviewUrl(task.imageUrl!)}>
+            <img src={task.imageUrl} alt="生成结果" className="w-full" />
+          </div>
+          {renderActions()}
+        </>
+      )}
+
+      {/* 预览 */}
+      {previewUrl && <ImagePreview url={previewUrl} onClose={() => setPreviewUrl(null)} />}
     </div>
   )
 }
 
 // ============================================================
-// 主应用
+// 主组件
 // ============================================================
 export default function App() {
-  const [theme, setTheme] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [cards, setCards] = useState<CardData[]>([])
-  const [error, setError] = useState<string | null>(null)
   const [mode, setMode] = useState<SpeedMode>('fast')
-  const [promptStates, setPromptStates] = useState<Record<string, {
-    prompt: string; promptState: 'idle' | 'loading' | 'done'
-    imageUrl?: string; imageLoading?: boolean; taskId?: string; imageError?: string
-  }>>({})
-  const cardsContainerRef = useRef<HTMLDivElement>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+
+  const [mjPrompt, setMjPrompt] = useState('')
+  const [mjPromptLoading, setMjPromptLoading] = useState(false)
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [genLoading, setGenLoading] = useState(false)
+
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const MODE_OPTIONS: { value: SpeedMode; label: string }[] = [
     { value: 'fast', label: '⚡ Fast' },
     { value: 'turbo', label: '🚀 Turbo' },
-    { value: 'relax', label: '🌿 Relax' },
+    { value: 'relax', label: '💤 Relax' },
   ]
 
-  async function generateAll() {
-    const text = theme.trim()
-    if (!text || loading) return
-    setLoading(true)
-    setError(null)
-    setCards([])
-    setPromptStates({})
+  // 自动滚动到最新消息
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // 聊天
+  async function handleSend() {
+    if (!input.trim() || chatLoading) return
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', content: input.trim(), time: Date.now() }
+    setMessages(prev => [...prev, userMsg])
+    setInput('')
+    setChatLoading(true)
+
     try {
-      const messages: ChatMessage[] = [
-        { role: 'system', content: DESIGN_PROMPT },
-        { role: 'user', content: text },
+      const assistantMsg: Message = { id: (Date.now() + 1).toString(), role: 'assistant', content: '', time: Date.now() }
+      setMessages(prev => [...prev, assistantMsg])
+
+      const allMessages: ChatMessage[] = [
+        ...messages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content
+        })),
+        { role: 'user', content: userMsg.content }
       ]
-      let response = ''
-      const stream = chatStream(messages)
-      for await (const chunk of stream) { response += chunk }
-      const parsed = parseZodiacCards(response)
-      if (parsed.length === 0) { setError('未能解析出星座方案'); return }
-      setCards(parsed.map((p, i) => ({ name: p.name, content: p.content, index: i })))
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e))
+
+      let fullContent = ''
+      for await (const chunk of chatStream(allMessages)) {
+        fullContent += chunk
+        setMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, content: fullContent } : m))
+      }
+    } catch (e) {
+      console.error(e)
     } finally {
-      setLoading(false)
+      setChatLoading(false)
     }
   }
 
-  async function handleGenPrompt(name: string, content: string) {
-    setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], promptState: 'loading', prompt: '' } }))
+  // 转换为MJ提示词
+  async function handleConvertToMJ() {
+    if (!mjPrompt.trim() || mjPromptLoading) return
+    setMjPromptLoading(true)
     try {
-      const messages: ChatMessage[] = [
-        { role: 'system', content: MJ_PROMPT_PROMPT },
-        { role: 'user', content: `转化：\n\n${content}` },
-      ]
-      let text = ''
-      const stream = chatStream(messages)
-      for await (const chunk of stream) { text += chunk }
-      setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], promptState: 'done', prompt: text.trim() } }))
-    } catch (e) { console.error(e) }
+      const convertPrompt = `将以下内容转化为专业的Midjourney英文提示词。要求：
+1. 纯英文输出，无任何特殊符号（除了最后的 --）
+2. 使用逗号分隔
+3. 包含细节、风格、光线、氛围等
+4. 参数：--ar 16:9 --v 7 --style raw
+
+内容：
+${mjPrompt}`
+      const result = await chatOnce([
+        { role: 'user', content: convertPrompt }
+      ])
+      // 清理结果，移除特殊符号
+      const cleaned = result.replace(/[""''【】《》（）()[\]{}【】]/g, '').replace(/--/g, ' --').trim()
+      setMjPrompt(cleaned)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setMjPromptLoading(false)
+    }
   }
 
-  async function handleGenImage(name: string, prompt: string) {
-    setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: true, imageError: undefined } }))
+  // 生成MJ图片
+  async function handleGenerateMJ() {
+    if (!mjPrompt.trim() || genLoading) return
+    setGenLoading(true)
+
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      prompt: mjPrompt,
+      status: 'loading'
+    }
+    setTasks(prev => [newTask, ...prev])
+
     try {
-      const res = await submitImagine(prompt, mode)
+      const res = await submitImagine(mjPrompt, mode)
       const taskId = res.result ?? res.taskId
-      if (!taskId) {
-        setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageError: '任务ID获取失败' } }))
-        return
-      }
-      setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: true, taskId } }))
+      if (!taskId) throw new Error('No task ID returned')
+
+      // 轮询
       const poll = setInterval(async () => {
         try {
           const task = await getTask(taskId, mode)
           if (task.status === 'SUCCESS' && task.imageUrl) {
             clearInterval(poll)
-            setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageUrl: task.imageUrl, imageError: undefined } }))
+            setTasks(prev => prev.map(t => t.id === newTask.id ? {
+              ...t,
+              status: 'success',
+              imageUrl: task.imageUrl
+            } : t))
+            setGenLoading(false)
           } else if (task.status === 'FAILURE') {
             clearInterval(poll)
-            setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageError: task.failReason || '生成失败' } }))
+            setTasks(prev => prev.map(t => t.id === newTask.id ? {
+              ...t,
+              status: 'failed',
+              failReason: task.failReason
+            } : t))
+            setGenLoading(false)
           }
         } catch (e) { /* ignore */ }
       }, 3000)
     } catch (e: any) {
-      console.error(e)
-      setPromptStates(prev => ({ ...prev, [name]: { ...prev[name], imageLoading: false, imageError: e?.message || '网络错误' } }))
+      setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, status: 'failed', failReason: e.message } : t))
+      setGenLoading(false)
+    }
+  }
+
+  // U/V操作
+  async function handleAction(taskId: string, action: string, label: string) {
+    const parentTask = tasks.find(t => t.id === taskId)
+    if (!parentTask?.imageUrl) return
+
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      prompt: parentTask.prompt,
+      status: 'loading',
+      action,
+      label
+    }
+    setTasks(prev => [newTask, ...prev])
+
+    try {
+      const res = await submitAction(parentTask.id, action, parseInt(label.replace(/\D/g, '')), mode)
+      const newId = res.result ?? res.taskId
+      if (!newId) throw new Error('No task ID')
+
+      const poll = setInterval(async () => {
+        try {
+          const task = await getTask(newId, mode)
+          if (task.status === 'SUCCESS' && task.imageUrl) {
+            clearInterval(poll)
+            setTasks(prev => prev.map(t => t.id === newTask.id ? {
+              ...t,
+              status: 'success',
+              imageUrl: task.imageUrl,
+              action,
+              label
+            } : t))
+          } else if (task.status === 'FAILURE') {
+            clearInterval(poll)
+            setTasks(prev => prev.map(t => t.id === newTask.id ? {
+              ...t,
+              status: 'failed',
+              failReason: task.failReason
+            } : t))
+          }
+        } catch (e) { /* ignore */ }
+      }, 3000)
+    } catch (e: any) {
+      setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, status: 'failed', failReason: e.message } : t))
+    }
+  }
+
+  // 视频生成
+  async function handleVideo(imageUrl: string) {
+    const newTask: Task = {
+      id: `task-${Date.now()}`,
+      prompt: 'Video generation',
+      status: 'loading',
+      action: 'video'
+    }
+    setTasks(prev => [newTask, ...prev])
+
+    try {
+      const res = await submitVideo(imageUrl)
+      const videoId = res.result ?? res.taskId
+      if (!videoId) throw new Error('No video task ID')
+
+      const poll = setInterval(async () => {
+        try {
+          const task = await getTask(videoId, mode)
+          if (task.status === 'SUCCESS' && (task.videoUrl || task.gifUrl)) {
+            clearInterval(poll)
+            setTasks(prev => prev.map(t => t.id === newTask.id ? {
+              ...t,
+              status: 'success',
+              videoUrl: task.videoUrl || task.gifUrl
+            } : t))
+          } else if (task.status === 'FAILURE') {
+            clearInterval(poll)
+            setTasks(prev => prev.map(t => t.id === newTask.id ? {
+              ...t,
+              status: 'failed',
+              failReason: task.failReason
+            } : t))
+          }
+        } catch (e) { /* ignore */ }
+      }, 3000)
+    } catch (e: any) {
+      setTasks(prev => prev.map(t => t.id === newTask.id ? { ...t, status: 'failed', failReason: e.message } : t))
     }
   }
 
   return (
-    <div className="min-h-screen relative" style={{ background: 'linear-gradient(135deg, #050508 0%, #0a0a15 50%, #050510 100%)' }}>
-      <ParticleBackground />
-
-      {/* 顶部导航 */}
-      <div className="relative z-10 px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid #1a1a2e' }}>
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">🎨</span>
-          <div>
-            <div className="text-white font-bold text-xl tracking-wider">MJ Studio</div>
-            <div className="text-xs" style={{ color: '#666' }}>12星座角色设计</div>
-          </div>
+    <div className="min-h-screen flex" style={{ background: '#050508' }}>
+      {/* 左侧聊天区 */}
+      <div className="w-96 flex flex-col border-r" style={{ borderColor: '#1a1a2e', background: 'linear-gradient(180deg, #0a0a15 0%, #050510 100%)' }}>
+        {/* 标题 */}
+        <div className="px-4 py-3 border-b" style={{ borderColor: '#1a1a2e' }}>
+          <h1 className="text-lg font-bold text-white">💬 AI 助手</h1>
+          <p className="text-xs text-gray-500">讨论你的创作想法</p>
         </div>
-        <div className="flex items-center gap-1 rounded-xl p-1" style={{ background: '#0a0a15', border: '1px solid #222' }}>
-          {MODE_OPTIONS.map(m => (
-            <button
-              key={m.value}
-              onClick={() => setMode(m.value)}
-              className="text-xs px-4 py-1.5 rounded-lg font-medium transition-all"
-              style={{
-                color: mode === m.value ? 'white' : '#555',
-                background: mode === m.value ? '#1a1a2e' : 'transparent',
-              }}
-            >
-              {m.label}
-            </button>
+
+        {/* 消息列表 */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.map(msg => (
+            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] rounded-xl px-4 py-2 ${
+                msg.role === 'user'
+                  ? 'text-white rounded-br-sm'
+                  : 'text-gray-300 rounded-bl-sm'
+              }`} style={{
+                background: msg.role === 'user'
+                  ? 'linear-gradient(135deg, #6633FF, #CC33FF)'
+                  : '#1a1a2e'
+              }}>
+                <pre className="whitespace-pre-wrap text-sm font-sans">{msg.content || (msg.role === 'assistant' ? '思考中...' : '')}</pre>
+              </div>
+            </div>
           ))}
-        </div>
-      </div>
-
-      {/* 主输入区 */}
-      <div className="relative z-10 max-w-4xl mx-auto px-6 py-8">
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-white mb-2">星座角色设计</h1>
-          <p className="text-sm" style={{ color: '#666' }}>输入主题，生成12星座女性角色设计方案</p>
+          <div ref={messagesEndRef} />
         </div>
 
-        <div className="flex gap-3">
-          <textarea
-            value={theme}
-            onChange={e => setTheme(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); generateAll() } }}
-            placeholder="输入设计主题，如：赛博朋克机甲战士、玄幻修仙仙女..."
-            className="flex-1 rounded-2xl px-4 py-3 text-sm resize-none focus:outline-none"
-            style={{
-              background: 'linear-gradient(135deg, #0a0a15, #0f0f1a)',
-              color: '#eee',
-              border: '1px solid #2a2a3e',
-              boxShadow: '0 0 30px #6633FF15, inset 0 0 30px #00000030',
-            }}
-            rows={3}
-          />
-          <button
-            onClick={generateAll}
-            disabled={!theme.trim() || loading}
-            className="px-8 py-3 rounded-2xl text-white font-bold text-sm transition-all hover:scale-105 disabled:opacity-40 self-start"
-            style={{
-              background: 'linear-gradient(135deg, #6633FF, #CC33FF, #FF3366)',
-              boxShadow: '0 0 30px #6633FF40',
-            }}
-          >
-            {loading ? '✨ 生成中...' : '🚀 生成12星座'}
-          </button>
-        </div>
-
-        {error && (
-          <div className="mt-4 p-3 rounded-xl text-sm text-red-400 text-center" style={{ background: '#FF336610', border: '1px solid #FF336630' }}>
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* 星座卡片区域 */}
-      <div className="relative z-10 max-w-7xl mx-auto px-6 pb-12">
-        {cards.length === 0 && !loading && (
-          <div className="text-center py-16">
-            <div className="text-5xl mb-4">🌟</div>
-            <div className="text-sm" style={{ color: '#444' }}>输入主题开始生成</div>
-          </div>
-        )}
-
-        {cards.length > 0 && (
-          <div ref={cardsContainerRef} className="relative">
-            {/* 卡片网格 */}
-            <div
-              className="grid gap-6 relative"
-              style={{
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                zIndex: 20,
-              }}
+        {/* 输入框 */}
+        <div className="p-4 border-t" style={{ borderColor: '#1a1a2e' }}>
+          <div className="flex gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+              placeholder="输入你的想法..."
+              className="flex-1 bg-[#1a1a2e] text-white text-sm rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500"
+              rows={2}
+            />
+            <button
+              onClick={handleSend}
+              disabled={chatLoading || !input.trim()}
+              className="px-4 rounded-lg font-medium transition-all hover:scale-105 disabled:opacity-50 disabled:hover:scale-100"
+              style={{ background: 'linear-gradient(135deg, #6633FF, #CC33FF)', color: 'white' }}
             >
-              {cards.map(card => (
-                <ZodiacCard
-                  key={card.name}
-                  card={card}
+              {chatLoading ? '↻' : '➤'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 右侧MJ生成区 */}
+      <div className="flex-1 flex flex-col">
+        {/* 顶部模式选择 */}
+        <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: '#1a1a2e', background: '#0a0a15' }}>
+          <h1 className="text-xl font-bold text-white">🎨 MJ Studio</h1>
+          <div className="flex gap-2">
+            {MODE_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setMode(opt.value)}
+                className="px-3 py-1 rounded-lg text-sm font-medium transition-all"
+                style={{
+                  background: mode === opt.value ? 'linear-gradient(135deg, #6633FF, #CC33FF)' : '#1a1a2e',
+                  color: mode === opt.value ? 'white' : '#888',
+                  border: mode === opt.value ? 'none' : '1px solid #2a2a4e'
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* MJ提示词区 */}
+        <div className="p-6 border-b" style={{ borderColor: '#1a1a2e' }}>
+          <div className="flex gap-2 mb-3">
+            <textarea
+              value={mjPrompt}
+              onChange={e => setMjPrompt(e.target.value)}
+              placeholder="在这里输入想法，AI会帮你转化成MJ提示词..."
+              className="flex-1 bg-[#1a1a2e] text-white text-sm rounded-lg px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500"
+              rows={3}
+            />
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={handleConvertToMJ}
+              disabled={mjPromptLoading || !mjPrompt.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-all hover:scale-105 disabled:opacity-50"
+              style={{ background: '#1a1a2e', color: '#ccc', border: '1px solid #6633FF40' }}
+            >
+              {mjPromptLoading ? '↻ 转化中...' : '✨ 转为MJ提示词'}
+            </button>
+            <button
+              onClick={handleGenerateMJ}
+              disabled={genLoading || !mjPrompt.trim()}
+              className="flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:scale-105 disabled:opacity-50"
+              style={{ background: genLoading ? '#333' : 'linear-gradient(135deg, #6633FF, #CC33FF)', color: 'white' }}
+            >
+              {genLoading ? '↻ 生成中...' : '🎨 生成图片'}
+            </button>
+          </div>
+        </div>
+
+        {/* 任务列表 */}
+        <div className="flex-1 overflow-y-auto p-6">
+          <h2 className="text-sm font-medium text-gray-400 mb-4">📋 生成任务 ({tasks.length})</h2>
+          {tasks.length === 0 ? (
+            <div className="text-center text-gray-500 py-12">
+              <p className="text-4xl mb-4">🎨</p>
+              <p>输入提示词开始创作</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {tasks.map(task => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onAction={handleAction}
+                  onVideo={handleVideo}
                   mode={mode}
-                  promptState={promptStates[card.name] || { prompt: '', promptState: 'idle' }}
-                  onGenPrompt={() => handleGenPrompt(card.name, card.content)}
-                  onGenImage={() => {
-                    const ps = promptStates[card.name]
-                    if (ps?.prompt) handleGenImage(card.name, ps.prompt)
-                  }}
                 />
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-
-      <style>{`
-        body { overflow-x: hidden; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #0a0a0f; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #444; }
-      `}</style>
     </div>
   )
 }
